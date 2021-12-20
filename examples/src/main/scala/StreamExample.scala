@@ -64,7 +64,7 @@ object StreamExample extends IOApp {
 
         val producer = 
           Stream
-            .repeatEval(randomMessage)
+            .repeatEval(IO.pure(Map(("1", "2"))))
             .map(XAddMessage(mystream, _))
             .chunkMin(1000)
             .flatMap{ chunk => 
@@ -75,7 +75,7 @@ object StreamExample extends IOApp {
 
         val stream = 
           Stream.exec(IO.println("Started")) ++
-            consumer
+            producer
               // .concurrently(producer) 
               // .interruptAfter(7.second)
 

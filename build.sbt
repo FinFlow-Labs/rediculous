@@ -1,4 +1,4 @@
-import sbtcrossproject.CrossPlugin.autoImport.{crossProject, CrossType}
+import sbt._
 
 val catsV = "2.6.1"
 val catsEffectV = "3.3.0"
@@ -6,71 +6,52 @@ val fs2V = "3.2.3"
 
 val munitCatsEffectV = "1.0.5"
 
-ThisBuild / crossScalaVersions := Seq("2.12.14","2.13.6", "3.0.0")
-ThisBuild / scalaVersion := "2.13.6"
+Global / onChangedBuildSource := IgnoreSourceChanges
+// ThisBuild / crossScalaVersions := Seq("2.12.14","2.13.6", "3.0.1")
+// ThisBuild / scalaVersion := "2.13.6"
+ThisBuild / scalaVersion := "3.0.1"
+ThisBuild / githubOwner := "FinFlow-Labs"
+ThisBuild / githubRepository := "github-packages"
+
+enablePlugins(GitHubPackagesPlugin)
+
+val GlobalSettingsGroup: Seq[Setting[_]] = Seq(
+  githubOwner := "FinFlow-Labs",
+  githubRepository := "github-packages",
+)
 
 // Projects
 lazy val `rediculous` = project.in(file("."))
-  .disablePlugins(MimaPlugin)
-  .enablePlugins(NoPublishPlugin)
-  .aggregate(core.jvm, core.js, examples.jvm, examples.js)
+  .aggregate(core, core, examples)
 
-lazy val core = crossProject(JVMPlatform, JSPlatform)
-  .crossType(CrossType.Pure)
+lazy val core = project
   .in(file("core"))
+  .settings(GlobalSettingsGroup)
   .settings(yPartial)
   .settings(
     name := "rediculous",
-    mimaPreviousArtifacts := Set(), // Bincompat breaking till next release
     testFrameworks += new TestFramework("munit.Framework"),
 
     libraryDependencies ++= Seq(
-      "org.typelevel"               %%% "cats-core"                  % catsV,
-
-      "org.typelevel"               %%% "cats-effect"                % catsEffectV,
-
-      "co.fs2"                      %%% "fs2-core"                   % fs2V,
-      "co.fs2"                      %%% "fs2-io"                     % fs2V,
-
-      "org.typelevel"               %%% "keypool"                    % "0.4.6",
-
-      "org.typelevel"               %%% "munit-cats-effect-3"        % munitCatsEffectV         % Test,
-      "org.scalameta"               %%% "munit-scalacheck"            % "0.7.27" % Test
+      "org.typelevel"               %% "cats-core"                  % catsV,
+      "org.typelevel"               %% "cats-effect"                % catsEffectV,
+      "co.fs2"                      %% "fs2-core"                   % fs2V,
+      "co.fs2"                      %% "fs2-io"                     % fs2V,
+      "org.typelevel"               %% "keypool"                    % "0.4.6",
+      "org.typelevel"               %% "munit-cats-effect-3"        % munitCatsEffectV         % Test,
+      "org.scalameta"               %% "munit-scalacheck"            % "0.7.27" % Test
     )
   )
+  
 
-lazy val examples = crossProject(JVMPlatform, JSPlatform)
-  .crossType(CrossType.Pure)
-  .in(file("examples"))
-  .disablePlugins(MimaPlugin)
-  .enablePlugins(NoPublishPlugin)
+lazy val examples =  project.in(file("examples"))
+  .settings(GlobalSettingsGroup)
   .dependsOn(core)
   .settings(yPartial)
   .settings(
     name := "rediculous-examples",
     run / fork := true,
-    scalaJSUseMainModuleInitializer := true,
-  ).jsSettings(
-    libraryDependencies ++= Seq(
-      "io.github.cquiroz" %%% "scala-java-time" % "2.3.0"
-    ),
-    Compile / mainClass := Some("BasicExample"),
-    scalaJSLinkerConfig ~= { _.withModuleKind(ModuleKind.CommonJSModule)},
-    scalaJSStage in Global := FullOptStage,
   )
-lazy val examplesJVM = examples.jvm
-lazy val examplesJS = examples.js
-
-lazy val site = project.in(file("site"))
-  .enablePlugins(DavenverseMicrositePlugin)
-  .disablePlugins(MimaPlugin)
-  .enablePlugins(NoPublishPlugin)
-  .settings{
-    import microsites._
-    Seq(
-      micrositeDescription := "Pure FP Redis Client",
-    )
-  }
 
 lazy val yPartial = 
   Seq(
