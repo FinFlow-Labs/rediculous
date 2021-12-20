@@ -1,7 +1,8 @@
 package io.chrisdavenport.rediculous
 
 import cats.syntax.all._
-import io.chrisdavenport.rediculous.Resp.ParseComplete
+import io.chrisdavenport.rediculous.Resp._
+import java.nio.charset.StandardCharsets
 import org.scalacheck.Prop
 
 class RespSpec extends munit.ScalaCheckSuite {
@@ -195,6 +196,41 @@ class RespSpec extends munit.ScalaCheckSuite {
           ))
           assertEquals(value, expected)
         case o => fail(s"Unexpected $o")
+      }
+    }
+
+    test("Resp parse an array of arrays, incomplete") {
+      val init = "*1\r\n*2\r\n$8\r\nmystream"
+      // Resp.Array.parse(init.getBytes()) match {
+      Resp.parseAll(init.getBytes()) match {
+        case ParseIncomplete(o) => 
+          val s = o.map(_.toChar).mkString
+          assertEquals(s, "$8\r\nmystream")
+        case o => fail(s"Unexpected")
+      }
+    }
+
+    test("Resp parse incomplete array bytes") {
+      val init = "*1024\r"
+      Resp.parseAll(init.getBytes()) match {
+        case ParseIncomplete(o) => 
+          val s = o.map(_.toChar).mkString
+          assertEquals(s, "$8\r\nmystream")
+        case ParseComplete(v, rest) => 
+          val str = new String(rest, StandardCharsets.UTF_8)
+          fail(s"Value: $v\nRemaining: $rest")
+        case o => fail(s"Unexpected: $o")
+      }
+    }
+
+    test("Resp parse an array of arrays, incomplete") {
+      val init = "*2\r\n$8\r\nmystream\r\n*1024\r"
+      // Resp.Array.parse(init.getBytes()) match {
+      Resp.parseAll(init.getBytes()) match {
+        case ParseIncomplete(o) => 
+          val s = o.map(_.toChar).mkString
+          assertEquals(s, "$8\r\nmystream")
+        case o => fail(s"Unexpected")
       }
     }
 }

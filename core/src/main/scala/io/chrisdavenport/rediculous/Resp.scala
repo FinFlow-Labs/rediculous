@@ -9,6 +9,7 @@ import java.nio.charset.StandardCharsets
 sealed trait Resp
 
 object Resp {
+
   import scala.{Array => SArray}
   sealed trait RespParserResult[+A]{
     def extract: Option[A] = this match {
@@ -30,6 +31,13 @@ object Resp {
   private[Resp] val MinusOne = "-1".getBytes()
 
   private[Resp] val CRLF = "\r\n".getBytes
+
+  implicit class PrettyBytes(s: SArray[Byte]) {
+    def pp: String = {
+      val str = new String(s, StandardCharsets.UTF_8)
+      str.replaceAll("\r", "\\\\r").replaceAll("\n", "\\\\n")
+    }
+  }
 
   def renderRequest(nel: NonEmptyList[String]): Resp = {
     Resp.Array(Some(
@@ -56,7 +64,8 @@ object Resp {
     def loop(arr: SArray[Byte]): RespParserResult[List[Resp]] = {
       if (arr.isEmpty) ParseComplete(listBuffer.toList, arr)
       else parse(arr) match {
-        case ParseIncomplete(out) => ParseComplete(listBuffer.toList, out)
+        case ParseIncomplete(out) => ParseIncomplete(out)
+        // case ParseIncomplete(out) => ParseComplete(listBuffer.toList, out)
         case ParseComplete(value, rest) =>
           listBuffer.append(value)
           loop(rest)
@@ -75,7 +84,9 @@ object Resp {
         case Colon => Integer.parse(arr)
         case Dollar => BulkString.parse(arr)
         case Star => Array.parse(arr)
-        case _   => ParseError("Resp.parse provided array does not begin with any of the valid bytes +,-,:,$,*", None)
+        case other   => 
+          Thread.dumpStack()
+          ParseError(s"Resp.parse provided array does not begin with any of the valid bytes +,-,:,$$,* : Got ${other.toChar} in ${arr.pp} of length: ${arr.length}", None)
       }
     } else {
       ParseIncomplete(arr)
@@ -223,20 +234,32 @@ object Resp {
       var length = -1
       try {
         if (arr(0) != Star) throw ParseError("RespArray String did not begin with *", None)
+        // read length first
         while (idx < arr.size && arr(idx) != CR){
           idx += 1
         }
-        if (idx < arr.size && (idx +1 <= arr.size) && arr(idx +1) == LF){
+        if ((idx +1 < arr.size) && arr(idx +1) == LF){
           val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8).toInt 
           length = out
           idx += 2
         }
+        else {
+          println(s"ArrIncomplete: ${arr.pp}, LENGTH: ${arr.length} idx: ${idx}")
+          Thread.dumpStack()
+          ParseIncomplete(arr)
+        }
+
         if (length == -1) ParseComplete(Array(None), arr.drop(idx))
         else {
           @scala.annotation.tailrec
           def repeatParse(arr: SArray[Byte], decrease: Int, accum: List[Resp]) : RespParserResult[Array] = {
-            if (decrease == 0) 
-              ParseComplete(Array(Some(accum.reverse)), arr)
+            if (arr.length < 400) println(s"RepeatParse: ${arr.pp}, LENGTH: ${arr.length} idx: ${idx} decrease: $decrease")
+            if (decrease == 0) {
+              if (accum.length == length)
+                ParseComplete(Array(Some(accum.reverse)), arr)
+              else ParseIncomplete(SArray.emptyByteArray)
+            }
+
             else 
               Resp.parse(arr) match {
                 case i@ParseIncomplete(_) => i
@@ -249,6 +272,8 @@ object Resp {
         }
       } catch {
         case NonFatal(e) => 
+          println(s"\r\nBAD: ${arr.pp}, LENGTH: ${arr.length}")
+          e.printStackTrace()
           ParseError(s"Error in RespArray Processing: ${e.getMessage}", Some(e))
       }
     }

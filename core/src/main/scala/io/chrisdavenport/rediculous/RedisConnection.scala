@@ -18,6 +18,7 @@ import fs2.io.net.tls.TLSParameters
 import java.time.Instant
 import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands.ClusterSlots
 import fs2.io.net.SocketGroupCompanionPlatform
+import java.nio.charset.StandardCharsets
 
 sealed trait RedisConnection[F[_]]
 object RedisConnection{
@@ -33,19 +34,33 @@ object RedisConnection{
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
-  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: Socket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = 5.seconds.some): F[List[Resp]] = {
-    def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[List[Resp]] = 
-    socket.read(maxBytes).flatMap{
-      case None => 
-        ApplicativeError[F, Throwable].raiseError[List[Resp]](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
-      case Some(bytes) => 
+  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: Socket[F], calls: Chunk[Resp], maxBytes: Int = 1024 * 1024 * 1024, timeout: Option[FiniteDuration] = None): F[List[Resp]] = {
+    def nextBytes: F[Chunk[Byte]] = socket.read(maxBytes).flatMap{
+      case None => ApplicativeError[F, Throwable].raiseError[Chunk[Byte]](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
+      case Some(bytes) => bytes.pure[F]
+    }
+
+    def nextUntilValidChunk(buf: Chunk[Byte]): F[Chunk[Byte]] = nextBytes.flatMap{ bytes => 
+      bytes.last match {
+        case Some(v) if v != '\n'.toByte => nextUntilValidChunk(buf ++ bytes)
+        case _ => (buf ++ bytes).pure[F]
+      }
+    }
+
+    def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[List[Resp]] = nextUntilValidChunk(Chunk.empty).flatMap{ bytes => 
+        // val str = new String((lastArr.toArray ++ bytes.toIterable), StandardCharsets.UTF_8)
+        // println(s"RAW WIRE: \n$str")
+        println(s"CALLS: $calls")
         Resp.parseAll(lastArr.toArray ++ bytes.toIterable) match {
-          case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
-          case Resp.ParseIncomplete(arr) => getTillEqualSize(acc, arr)
+          case e@Resp.ParseError(_, _) => 
+            ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
+          case Resp.ParseIncomplete(arr) => 
+            println(s"INCOMPLETE")
+            getTillEqualSize(acc, lastArr.toArray ++ bytes.toIterable)
           case Resp.ParseComplete(value, rest) => 
+            println(s"COMPLETE")
             if (value.size + acc.foldMap(_.size) === calls.size) (value ::acc ).reverse.flatten.pure[F]
             else getTillEqualSize(value :: acc, rest)
-          
         }
     }
     if (calls.nonEmpty){
@@ -92,13 +107,33 @@ object RedisConnection{
 
   // Can Be used to implement any low level protocols.
   def runRequest[F[_]: Concurrent, A: RedisResult](connection: RedisConnection[F])(input: NonEmptyList[String], key: Option[String]): F[Either[Resp, A]] = 
-    runRequestInternal(connection)(NonEmptyList.of(input), key).map(nel => RedisResult[A].decode(nel.head))
+    runRequestInternal(connection)(NonEmptyList.of(input), key).map{nel => 
+      // val ss = nel.map(printWith(_))
+      // println(s"nel: ${ss}")
+      RedisResult[A].decode(nel.head)
+    }
+
+  def printWith(resp: Resp, depth: Int = 0): String = resp match {
+    case Resp.BulkString(Some(value)) => s"\"$value\""
+    case Resp.BulkString(None) => "(empty bulk string)"
+    case Resp.SimpleString(value) => value
+    case Resp.Integer(long) => s"(integer) $long"
+    case Resp.Error(value) => s"(error) $value"
+    case Resp.Array(None) => "(empty array)"
+    case Resp.Array(Some(a)) => 
+      a.zipWithIndex.map{ case (a, i) => (a, i + 1)}
+        .map{ case (resp, i) => 
+          val whitespace = if (i > 1) List.fill(depth * 3)(" ").mkString  else ""
+          whitespace ++ s"$i) ${printWith(resp, depth + 1)}"
+        }.mkString("\n")
+    
+  }
 
   def runRequestTotal[F[_]: Concurrent, A: RedisResult](input: NonEmptyList[String], key: Option[String]): Redis[F, A] = Redis(Kleisli{(connection: RedisConnection[F]) => 
     runRequest(connection)(input, key).flatMap{
       case Right(a) => a.pure[F]
       case Left(e@Resp.Error(_)) => ApplicativeError[F, Throwable].raiseError[A](e)
-      case Left(other) => ApplicativeError[F, Throwable].raiseError[A](RedisError.Generic(s"Rediculous: Incompatible Return Type for Operation: ${input.head}, got: $other"))
+      case Left(other) => ApplicativeError[F, Throwable].raiseError[A](RedisError.Generic(s"Rediculous: Incompatible Return Type for Operation: ${input.head}, got: ${printWith(other)}"))
     }
   })
 
