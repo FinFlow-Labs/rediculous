@@ -34,10 +34,14 @@ object Resp {
 
   private[Resp] val CRLF = "\r\n".getBytes
 
-  implicit class PrettyBytes(s: ByteVector) {
-    def pp: String = {
-      val str = new String(s.toArray, StandardCharsets.UTF_8)
+  implicit class ByteVectorStringDecoder(s: ByteVector) {
+    def prettyprint: String = {
+      val str = s.decodeUtf8.getOrElse{throw new RuntimeException("Unable to parse as utf8 string")}
       str.replaceAll("\r", "\\\\r").replaceAll("\n", "\\\\n")
+    }
+
+    def decodeSubsetAsUtf8(offset: Int, length: Int): String = {
+      s.slice(offset, offset + length).decodeUtf8.getOrElse{throw new RuntimeException("Unable to parse as utf8 string")}
     }
   }
 
@@ -88,7 +92,7 @@ object Resp {
         case Star => Array.parse(arr)
         case other   => 
           Thread.dumpStack()
-          ParseError(s"Resp.parse provided array does not begin with any of the valid bytes +,-,:,$$,* : Got ${other.toChar} in ${arr.pp} of length: ${arr.length}", None)
+          ParseError(s"Resp.parse provided array does not begin with any of the valid bytes +,-,:,$$,* : Got ${other.toChar} in ${arr.prettyprint} of length: ${arr.length}", None)
       }
     } else {
       ParseIncomplete(arr)
@@ -115,7 +119,7 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8)
+          val out = arr.decodeSubsetAsUtf8(1, idx - 1)
           ParseComplete(SimpleString(out), arr.drop(idx + 2))
         } else {
           ParseIncomplete(arr)
@@ -142,7 +146,7 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8)
+          val out = arr.decodeSubsetAsUtf8(1, idx - 1)
           ParseComplete(Error(out), arr.drop(idx + 2))
         } else {
           ParseIncomplete(arr)
@@ -167,7 +171,7 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8).toLong
+          val out = arr.decodeSubsetAsUtf8(1, idx - 1).toLong
           ParseComplete(Integer(out), arr.drop(idx + 2))
         } else {
           ParseIncomplete(arr)
@@ -208,13 +212,13 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8).toInt 
+          val out = arr.decodeSubsetAsUtf8(1, idx - 1).toInt
           length = out
           idx += 2
         }
         if (length == -1) ParseComplete(BulkString(None), arr.drop(idx))
         else if (idx + length + 2 <= arr.size)  {
-          val out = new String(arr.toArray, idx, length, StandardCharsets.UTF_8)
+          val out = arr.decodeSubsetAsUtf8(idx, length)
           ParseComplete(BulkString(Some(out)), arr.drop(idx + length + 2))
         } else ParseIncomplete(arr)
       } catch {
@@ -253,12 +257,12 @@ object Resp {
           idx += 1
         }
         if ((idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8).toInt 
+          val out = arr.decodeSubsetAsUtf8(1, idx - 1).toInt
           length = out
           idx += 2
         }
         else {
-          println(s"ArrIncomplete: ${arr.pp}, LENGTH: ${arr.length} idx: ${idx}")
+          println(s"ArrIncomplete: ${arr.prettyprint}, LENGTH: ${arr.length} idx: ${idx}")
           Thread.dumpStack()
           ParseIncomplete(arr)
         }
@@ -285,7 +289,7 @@ object Resp {
         }
       } catch {
         case NonFatal(e) => 
-          println(s"\r\nBAD: ${arr.pp}, LENGTH: ${arr.length}")
+          println(s"\r\nBAD: ${arr.prettyprint}, LENGTH: ${arr.length}")
           e.printStackTrace()
           ParseError(s"Error in RespArray Processing: ${e.getMessage}", Some(e))
       }
