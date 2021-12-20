@@ -10,6 +10,7 @@ import cats.data.NonEmptyList
 import scala.concurrent.duration._
 import _root_.io.chrisdavenport.rediculous.implicits._
 import org.typelevel.keypool.Reusable
+import scodec.bits.ByteVector
 
 /**
  * A RedisPubSub Represent an connection or group of connections
@@ -142,12 +143,12 @@ object RedisPubSub {
       cbStorage.update(_ - (pSubPrefix + key))
     }
 
-    def readMessages(socket: Socket[F], lastArr: Array[Byte]): F[Unit] = {
+    def readMessages(socket: Socket[F], lastArr: ByteVector): F[Unit] = {
       socket.read(maxBytes).flatMap{
         case None => 
           ApplicativeError[F, Throwable].raiseError[Unit](RedisError.Generic("Rediculous: Connection Closed"))
         case Some(bytes) => 
-          Resp.parseAll(lastArr.toArray ++ bytes.toIterable) match {
+          Resp.parseAll(lastArr ++ bytes.toByteVector) match {
             case e@Resp.ParseError(_, _) => ApplicativeError[F, Throwable].raiseError[Unit](e)
             case Resp.ParseIncomplete(arr) => readMessages(socket, arr)
             case Resp.ParseComplete(value, rest) => cbStorage.get.flatMap{cbmap => 
@@ -196,11 +197,11 @@ object RedisPubSub {
       case Nil => 
         Applicative[F].unit
       case head :: Nil =>
-        readMessages(head, Array())
+        readMessages(head, ByteVector.empty)
       case otherwise => 
         Stream.emits(otherwise)
         .covary[F]
-        .parEvalMap(Int.MaxValue)(readMessages(_, Array()))
+        .parEvalMap(Int.MaxValue)(readMessages(_, ByteVector.empty))
         .compile
         .drain
     }

@@ -11,14 +11,16 @@ sealed trait Resp
 object Resp {
 
   import scala.{Array => SArray}
+  import scodec.bits.ByteVector
+  
   sealed trait RespParserResult[+A]{
     def extract: Option[A] = this match {
       case ParseComplete(out, _) => Some(out)
       case _ => None
     }
   }
-  final case class ParseComplete[A](value: A, rest: SArray[Byte]) extends RespParserResult[A]
-  final case class ParseIncomplete(arr: SArray[Byte]) extends RespParserResult[Nothing]
+  final case class ParseComplete[A](value: A, rest: ByteVector) extends RespParserResult[A]
+  final case class ParseIncomplete(arr: ByteVector) extends RespParserResult[Nothing]
   final case class ParseError(message: String, cause: Option[Throwable]) extends RedisError with RespParserResult[Nothing]
   private[Resp] val CR = '\r'.toByte
   private[Resp] val LF = '\n'.toByte
@@ -32,9 +34,9 @@ object Resp {
 
   private[Resp] val CRLF = "\r\n".getBytes
 
-  implicit class PrettyBytes(s: SArray[Byte]) {
+  implicit class PrettyBytes(s: ByteVector) {
     def pp: String = {
-      val str = new String(s, StandardCharsets.UTF_8)
+      val str = new String(s.toArray, StandardCharsets.UTF_8)
       str.replaceAll("\r", "\\\\r").replaceAll("\n", "\\\\n")
     }
   }
@@ -59,9 +61,9 @@ object Resp {
     }
   }
 
-  def parseAll(arr: SArray[Byte]): RespParserResult[List[Resp]] = { // TODO Investigate Performance Benchmarks with Chain
+  def parseAll(arr: ByteVector): RespParserResult[List[Resp]] = { // TODO Investigate Performance Benchmarks with Chain
     val listBuffer = new mutable.ListBuffer[Resp]
-    def loop(arr: SArray[Byte]): RespParserResult[List[Resp]] = {
+    def loop(arr: ByteVector): RespParserResult[List[Resp]] = {
       if (arr.isEmpty) ParseComplete(listBuffer.toList, arr)
       else parse(arr) match {
         case ParseIncomplete(out) => ParseIncomplete(out)
@@ -75,7 +77,7 @@ object Resp {
     loop(arr)
   }
 
-  def parse(arr: SArray[Byte]): RespParserResult[Resp] = {
+  def parse(arr: ByteVector): RespParserResult[Resp] = {
     if (arr.size > 0) {
       val switchVal = arr(0)
       switchVal match {
@@ -105,7 +107,7 @@ object Resp {
       buffer.++=(CRLF)
       buffer.toArray
     }
-    def parse(arr: SArray[Byte]): RespParserResult[SimpleString] = {
+    def parse(arr: ByteVector): RespParserResult[SimpleString] = {
       var idx = 1
       try {
         if (arr(0) != Plus) throw ParseError("RespSimple String did not begin with +", None)
@@ -113,7 +115,7 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8)
+          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8)
           ParseComplete(SimpleString(out), arr.drop(idx + 2))
         } else {
           ParseIncomplete(arr)
@@ -132,7 +134,7 @@ object Resp {
   object Error {
     def encode(error: Error): SArray[Byte] = 
       SArray(Minus) ++ error.value.getBytes(StandardCharsets.UTF_8) ++ CRLF
-    def parse(arr: SArray[Byte]): RespParserResult[Error] = {
+    def parse(arr: ByteVector): RespParserResult[Error] = {
       var idx = 1
       try {
         if (arr(0) != Minus) throw ParseError("RespError did not begin with -", None)
@@ -140,7 +142,7 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8)
+          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8)
           ParseComplete(Error(out), arr.drop(idx + 2))
         } else {
           ParseIncomplete(arr)
@@ -157,7 +159,7 @@ object Resp {
     def encode(i: Integer): SArray[Byte] = {
       SArray(Colon) ++ i.long.toString().getBytes(StandardCharsets.UTF_8) ++ CRLF
     }
-    def parse(arr: SArray[Byte]): RespParserResult[Integer] = {
+    def parse(arr: ByteVector): RespParserResult[Integer] = {
       var idx = 1
       try {
         if (arr(0) != Colon) throw ParseError("RespInteger String did not begin with :", None)
@@ -165,7 +167,7 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8).toLong
+          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8).toLong
           ParseComplete(Integer(out), arr.drop(idx + 2))
         } else {
           ParseIncomplete(arr)
@@ -197,7 +199,7 @@ object Resp {
         }
       }
     }
-    def parse(arr: SArray[Byte]): RespParserResult[BulkString] = {
+    def parse(arr: ByteVector): RespParserResult[BulkString] = {
       var idx = 1
       var length = -1
       try {
@@ -206,13 +208,13 @@ object Resp {
           idx += 1
         }
         if (idx < arr.size && (idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8).toInt 
+          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8).toInt 
           length = out
           idx += 2
         }
         if (length == -1) ParseComplete(BulkString(None), arr.drop(idx))
         else if (idx + length + 2 <= arr.size)  {
-          val out = new String(arr, idx, length, StandardCharsets.UTF_8)
+          val out = new String(arr.toArray, idx, length, StandardCharsets.UTF_8)
           ParseComplete(BulkString(Some(out)), arr.drop(idx + length + 2))
         } else ParseIncomplete(arr)
       } catch {
@@ -241,7 +243,7 @@ object Resp {
       }
       buffer.result()
     }
-    def parse(arr: SArray[Byte]): RespParserResult[Array] = {
+    def parse(arr: ByteVector): RespParserResult[Array] = {
       var idx = 1
       var length = -1
       try {
@@ -251,7 +253,7 @@ object Resp {
           idx += 1
         }
         if ((idx +1 < arr.size) && arr(idx +1) == LF){
-          val out = new  String(arr, 1, idx - 1, StandardCharsets.UTF_8).toInt 
+          val out = new  String(arr.toArray, 1, idx - 1, StandardCharsets.UTF_8).toInt 
           length = out
           idx += 2
         }
@@ -264,11 +266,11 @@ object Resp {
         if (length == -1) ParseComplete(Array(None), arr.drop(idx))
         else {
           @scala.annotation.tailrec
-          def repeatParse(arr: SArray[Byte], decrease: Int, accum: List[Resp]) : RespParserResult[Array] = {
+          def repeatParse(arr: ByteVector, decrease: Int, accum: List[Resp]) : RespParserResult[Array] = {
             if (decrease == 0) {
               if (accum.length == length)
                 ParseComplete(Array(Some(accum.reverse)), arr)
-              else ParseIncomplete(SArray.emptyByteArray)
+              else ParseIncomplete(ByteVector.empty)
             }
 
             else 

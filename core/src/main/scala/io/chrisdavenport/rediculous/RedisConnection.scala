@@ -19,6 +19,7 @@ import java.time.Instant
 import _root_.io.chrisdavenport.rediculous.cluster.ClusterCommands.ClusterSlots
 import fs2.io.net.SocketGroupCompanionPlatform
 import java.nio.charset.StandardCharsets
+import scodec.bits.ByteVector
 
 sealed trait RedisConnection[F[_]]
 object RedisConnection{
@@ -35,26 +36,26 @@ object RedisConnection{
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
   private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: Socket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = None): F[List[Resp]] = {
-    def nextBytes: F[Chunk[Byte]] = socket.read(maxBytes).flatMap{
-      case None => ApplicativeError[F, Throwable].raiseError[Chunk[Byte]](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
-      case Some(bytes) => bytes.pure[F]
+    def nextBytes: F[ByteVector] = socket.read(maxBytes).flatMap{
+      case None => ApplicativeError[F, Throwable].raiseError[ByteVector](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
+      case Some(bytes) => bytes.toByteVector.pure[F]
     }
 
-    def readUntilValidChunk(buf: Chunk[Byte]): F[Chunk[Byte]] = nextBytes.flatMap{ bytes => 
+    def readUntilValidChunk(buf: ByteVector): F[ByteVector] = nextBytes.flatMap{ bytes => 
       val yOpt = if (bytes.size >= 2) bytes(bytes.size - 2).toChar.some else None
 
-      (yOpt, bytes.last.map(_.toChar)) match {
+      (yOpt, bytes.lastOption.map(_.toChar)) match {
         case (Some('\r'), Some('\n')) => (buf ++ bytes).pure[F]
         case _ => readUntilValidChunk(buf ++ bytes)
       }
     }
 
-    def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[List[Resp]] = readUntilValidChunk(Chunk.empty).flatMap{ bytes => 
-        Resp.parseAll(lastArr.toArray ++ bytes.toIterable) match {
+    def getTillEqualSize(acc: List[List[Resp]], lastArr: ByteVector): F[List[Resp]] = readUntilValidChunk(ByteVector.empty).flatMap{ bytes => 
+        Resp.parseAll(lastArr ++ bytes) match {
           case e@Resp.ParseError(_, _) => 
             ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
           case Resp.ParseIncomplete(arr) => 
-            getTillEqualSize(acc, lastArr.toArray ++ bytes.toIterable)
+            getTillEqualSize(acc, lastArr ++ bytes)
           case Resp.ParseComplete(value, rest) => 
             if (value.size + acc.foldMap(_.size) === calls.size) (value ::acc ).reverse.flatten.pure[F]
             else getTillEqualSize(value :: acc, rest)
@@ -67,7 +68,7 @@ object RedisConnection{
             buffer.++=(Resp.encode(resp))
         }
       socket.write(Chunk.array(buffer.result())) >>
-      getTillEqualSize(List.empty, Array.emptyByteArray)
+      getTillEqualSize(List.empty, ByteVector.empty)
     } else Applicative[F].pure(List.empty)
   }
 
