@@ -55,7 +55,7 @@ object StreamExample extends IOApp {
       .map(RedisStream.fromConnection[IO])
       .use { rs => 
         val consumer = rs
-          .read(Set(mystream), 10000, count = 1024L.some)
+          .read(Set(mystream), 100, count = 256L.some)
           // .evalMap(putStrLn)
           .onError{ case err  => 
             Stream.exec(IO.println(s"Consumer err: $err"))
@@ -66,7 +66,7 @@ object StreamExample extends IOApp {
           Stream
             .repeatEval(randomMessage)
             .map(XAddMessage(mystream, _))
-            .chunkMin(10000)
+            .chunkMin(1000)
             .flatMap{ chunk => 
               Stream.evalSeq(rs.append(chunk.toList))
             }

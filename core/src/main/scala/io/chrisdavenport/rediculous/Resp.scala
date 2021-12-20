@@ -265,7 +265,6 @@ object Resp {
         else {
           @scala.annotation.tailrec
           def repeatParse(arr: SArray[Byte], decrease: Int, accum: List[Resp]) : RespParserResult[Array] = {
-            if (arr.length < 400) println(s"RepeatParse: ${arr.pp}, LENGTH: ${arr.length} idx: ${idx} decrease: $decrease")
             if (decrease == 0) {
               if (accum.length == length)
                 ParseComplete(Array(Some(accum.reverse)), arr)

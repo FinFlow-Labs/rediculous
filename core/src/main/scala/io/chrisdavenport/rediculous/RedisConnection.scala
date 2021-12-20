@@ -34,31 +34,28 @@ object RedisConnection{
 
   // Guarantees With Socket That Each Call Receives a Response
   // Chunk must be non-empty but to do so incurs a penalty
-  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: Socket[F], calls: Chunk[Resp], maxBytes: Int = 1024 * 1024 * 1024, timeout: Option[FiniteDuration] = None): F[List[Resp]] = {
+  private[rediculous] def explicitPipelineRequest[F[_]: MonadThrow](socket: Socket[F], calls: Chunk[Resp], maxBytes: Int = 8 * 1024 * 1024, timeout: Option[FiniteDuration] = None): F[List[Resp]] = {
     def nextBytes: F[Chunk[Byte]] = socket.read(maxBytes).flatMap{
       case None => ApplicativeError[F, Throwable].raiseError[Chunk[Byte]](RedisError.Generic("Rediculous: Terminated Before reaching Equal size"))
       case Some(bytes) => bytes.pure[F]
     }
 
-    def nextUntilValidChunk(buf: Chunk[Byte]): F[Chunk[Byte]] = nextBytes.flatMap{ bytes => 
-      bytes.last match {
-        case Some(v) if v != '\n'.toByte => nextUntilValidChunk(buf ++ bytes)
-        case _ => (buf ++ bytes).pure[F]
+    def readUntilValidChunk(buf: Chunk[Byte]): F[Chunk[Byte]] = nextBytes.flatMap{ bytes => 
+      val yOpt = if (bytes.size >= 2) bytes(bytes.size - 2).toChar.some else None
+
+      (yOpt, bytes.last.map(_.toChar)) match {
+        case (Some('\r'), Some('\n')) => (buf ++ bytes).pure[F]
+        case _ => readUntilValidChunk(buf ++ bytes)
       }
     }
 
-    def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[List[Resp]] = nextUntilValidChunk(Chunk.empty).flatMap{ bytes => 
-        // val str = new String((lastArr.toArray ++ bytes.toIterable), StandardCharsets.UTF_8)
-        // println(s"RAW WIRE: \n$str")
-        println(s"CALLS: $calls")
+    def getTillEqualSize(acc: List[List[Resp]], lastArr: Array[Byte]): F[List[Resp]] = readUntilValidChunk(Chunk.empty).flatMap{ bytes => 
         Resp.parseAll(lastArr.toArray ++ bytes.toIterable) match {
           case e@Resp.ParseError(_, _) => 
             ApplicativeError[F, Throwable].raiseError[List[Resp]](e)
           case Resp.ParseIncomplete(arr) => 
-            println(s"INCOMPLETE")
             getTillEqualSize(acc, lastArr.toArray ++ bytes.toIterable)
           case Resp.ParseComplete(value, rest) => 
-            println(s"COMPLETE")
             if (value.size + acc.foldMap(_.size) === calls.size) (value ::acc ).reverse.flatten.pure[F]
             else getTillEqualSize(value :: acc, rest)
         }
