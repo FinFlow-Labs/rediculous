@@ -47,16 +47,7 @@ lazy val core = project
 lazy val examples =  project.in(file("examples"))
   .settings(GlobalSettingsGroup)
   .dependsOn(core)
-  .settings(yPartial)
   .settings(
     name := "rediculous-examples",
     run / fork := true,
-  )
-
-lazy val yPartial = 
-  Seq(
-    scalacOptions ++= {
-      if (scalaVersion.value.startsWith("2.12")) Seq("-Ypartial-unification")
-      else Seq()
-    }
   )
