@@ -16,7 +16,7 @@ trait RedisStream[F[_]] {
   def read(
     keys: Set[String],
     chunkSize: Int,
-    initialOffset: String => StreamOffset = StreamOffset.All,
+    initialOffset: String => StreamOffset = StreamOffset.All.apply,
     block: Duration = Duration.Zero,
     count: Option[Long] = None
   ): Stream[F, XReadMessage]

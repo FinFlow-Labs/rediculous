@@ -4,11 +4,12 @@ import cats.syntax.all._
 import io.chrisdavenport.rediculous.Resp._
 import java.nio.charset.StandardCharsets
 import org.scalacheck.Prop
+import scodec.bits.ByteVector
 
 class RespSpec extends munit.ScalaCheckSuite {
   // "Resp" should {
     test("Resp parse a simple-string") {
-      Resp.SimpleString.parse("+OK\r\n".getBytes()) match {
+      Resp.SimpleString.parse(ByteVector("+OK\r\n".toByte)) match {
         case ParseComplete(value, _) => 
           assert(value.value === "OK")
         case _ => fail("Did not complete")
@@ -32,7 +33,7 @@ class RespSpec extends munit.ScalaCheckSuite {
 
     test("Resp parse an error"){
       val s = "-Error message\r\n"
-      Resp.Error.parse(s.getBytes()) match {
+      Resp.Error.parse(ByteVector(s.getBytes())) match {
         case ParseComplete(value, _) => 
           assert(value.value === "Error message")
         case o => fail(s"Unexpected: $o")
@@ -53,7 +54,7 @@ class RespSpec extends munit.ScalaCheckSuite {
 
     test("Resp parse an integer") {
       val s = ":1000\r\n"
-      Resp.Integer.parse(s.getBytes()) match {
+      Resp.Integer.parse(ByteVector(s.getBytes())) match {
         case ParseComplete(value, _) => 
           assert(value.long === 1000L)
         case o => fail(s"Unexpected $o")
@@ -71,7 +72,7 @@ class RespSpec extends munit.ScalaCheckSuite {
       Prop.forAll{ (l: Long) => 
         val init = Resp.Integer(l)
         Resp.Integer.parse(
-          Resp.Integer.encode(init)
+          ByteVector(Resp.Integer.encode(init))
         ).extract match {
           case Some(value) => 
             assertEquals(value, init)
@@ -82,7 +83,7 @@ class RespSpec extends munit.ScalaCheckSuite {
 
     test("Resp parse a bulk string") {
       val s = "$6\r\nfoobar\r\n"
-      Resp.BulkString.parse(s.getBytes()) match {
+      Resp.BulkString.parse(ByteVector(s.getBytes())) match {
         case ParseComplete(value, _) => 
         value.value match {
           case Some(s2) => assert(s2 === "foobar")
@@ -94,7 +95,7 @@ class RespSpec extends munit.ScalaCheckSuite {
 
     test("Resp parse an empty bulk string") {
       val s = "$0\r\n\r\n"
-      Resp.BulkString.parse(s.getBytes()) match {
+      Resp.BulkString.parse(ByteVector(s.getBytes())) match {
         case ParseComplete(value, _) => 
         value.value match {
           case Some(s2) => assert(s2 === "")
@@ -106,7 +107,7 @@ class RespSpec extends munit.ScalaCheckSuite {
 
     test("Resp parse a null bulk string") {
       val s = "$-1\r\n"
-      Resp.BulkString.parse(s.getBytes()) match {
+      Resp.BulkString.parse(ByteVector(s.getBytes())) match {
         case ParseComplete(value, _) => 
           assert(value.value === None)
         case o => fail(s"Unexpected $o")
@@ -116,7 +117,7 @@ class RespSpec extends munit.ScalaCheckSuite {
     property("Resp round-trip a bulk-string"){ Prop.forAll{ (s : String) => 
       val init = Resp.BulkString(Some(s))
       Resp.BulkString.parse(
-        Resp.BulkString.encode(init)
+        ByteVector(Resp.BulkString.encode(init))
       ).extract match {
         case Some(value) => 
           assertEquals(value, init)
@@ -126,8 +127,8 @@ class RespSpec extends munit.ScalaCheckSuite {
     }
 
     test("Resp parse an empty array") {
-      val init = "*0\r\n"
-      Resp.Array.parse(init.getBytes()) match {
+      val init = "*0\r\n".getBytes
+      Resp.Array.parse(ByteVector(init)) match {
         case ParseComplete(value, _) => 
           value.a match {
             case Some(l) => assert (l.isEmpty)
@@ -138,8 +139,8 @@ class RespSpec extends munit.ScalaCheckSuite {
     }
 
     test("Resp parse an array of bulk strings") {
-      val init = "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n"
-      Resp.Array.parse(init.getBytes()) match {
+      val init = "*2\r\n$3\r\nfoo\r\n$3\r\nbar\r\n".getBytes
+      Resp.Array.parse(ByteVector(init)) match {
         case ParseComplete(value, _) => 
           value.a match {
             case Some(Resp.BulkString(Some("foo")) :: Resp.BulkString(Some("bar")) :: Nil) => assert(true)
@@ -150,8 +151,8 @@ class RespSpec extends munit.ScalaCheckSuite {
     }
 
     test("Resp parse an array of integers") {
-      val init = "*3\r\n:1\r\n:2\r\n:3\r\n"
-      Resp.Array.parse(init.getBytes()) match {
+      val init = "*3\r\n:1\r\n:2\r\n:3\r\n".getBytes
+      Resp.Array.parse(ByteVector(init)) match {
         case ParseComplete(value, _) => 
           value.a match {
             case Some(l) => 
@@ -163,8 +164,8 @@ class RespSpec extends munit.ScalaCheckSuite {
     }
 
     test("Resp parse an array of mixed types") {
-      val init = "*5\r\n:1\r\n:2\r\n:3\r\n:4\r\n$6\r\nfoobar\r\n"
-      Resp.Array.parse(init.getBytes()) match {
+      val init = "*5\r\n:1\r\n:2\r\n:3\r\n:4\r\n$6\r\nfoobar\r\n".getBytes
+      Resp.Array.parse(ByteVector(init)) match {
         case ParseComplete(value, _) => 
           value.a match {
             case Some(l) => 
@@ -176,8 +177,8 @@ class RespSpec extends munit.ScalaCheckSuite {
     }
 
     test("Resp parse a null array") {
-      val init = "*-1\r\n"
-      Resp.Array.parse(init.getBytes()) match {
+      val init = "*-1\r\n".getBytes
+      Resp.Array.parse(ByteVector(init)) match {
         case ParseComplete(value, _) => 
           assertEquals(value.a, None)
         case o => fail(s"Unexpected $o")
@@ -185,8 +186,8 @@ class RespSpec extends munit.ScalaCheckSuite {
     }
 
     test("Resp parse an array of arrays") {
-      val init = "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-Bar\r\n"
-      Resp.Array.parse(init.getBytes()).extract match {
+      val init = "*2\r\n*3\r\n:1\r\n:2\r\n:3\r\n*2\r\n+Foo\r\n-Bar\r\n".getBytes
+      Resp.Array.parse(ByteVector(init)).extract match {
         case Some(value) => 
           val expected = Resp.Array(Some(
             List(
@@ -200,35 +201,35 @@ class RespSpec extends munit.ScalaCheckSuite {
     }
 
     test("Resp parse an array of arrays, incomplete") {
-      val init = "*1\r\n*2\r\n$8\r\nmystream"
-      // Resp.Array.parse(init.getBytes()) match {
-      Resp.parseAll(init.getBytes()) match {
+      val init = "*1\r\n*2\r\n$8\r\nmystream".getBytes
+      // Resp.Array.parse(ByteVector(init)) match {
+      Resp.parseAll(ByteVector(init)) match {
         case ParseIncomplete(o) => 
-          val s = o.map(_.toChar).mkString
+          val s = o.decodeUtf8.getOrElse(???)
           assertEquals(s, "$8\r\nmystream")
         case o => fail(s"Unexpected")
       }
     }
 
     test("Resp parse incomplete array bytes") {
-      val init = "*1024\r"
-      Resp.parseAll(init.getBytes()) match {
+      val init = "*1024\r".getBytes
+      Resp.parseAll(ByteVector(init)) match {
         case ParseIncomplete(o) => 
-          val s = o.map(_.toChar).mkString
+          val s = o.decodeUtf8.right.get
           assertEquals(s, "$8\r\nmystream")
         case ParseComplete(v, rest) => 
-          val str = new String(rest, StandardCharsets.UTF_8)
+          val str = rest.decodeUtf8.right.get
           fail(s"Value: $v\nRemaining: $rest")
         case o => fail(s"Unexpected: $o")
       }
     }
 
     test("Resp parse an array of arrays, incomplete") {
-      val init = "*2\r\n$8\r\nmystream\r\n*1024\r"
-      // Resp.Array.parse(init.getBytes()) match {
-      Resp.parseAll(init.getBytes()) match {
+      val init = "*2\r\n$8\r\nmystream\r\n*1024\r".getBytes
+      // Resp.Array.parse(ByteVector(init)) match {
+      Resp.parseAll(ByteVector(init)) match {
         case ParseIncomplete(o) => 
-          val s = o.map(_.toChar).mkString
+          val s = o.decodeUtf8.right.get
           assertEquals(s, "$8\r\nmystream")
         case o => fail(s"Unexpected")
       }

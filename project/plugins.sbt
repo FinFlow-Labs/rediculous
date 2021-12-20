@@ -1,2 +1,5 @@
 // addSbtPlugin("io.github.davidgregory084" % "sbt-tpolecat" % "0.1.16")
+addSbtPlugin("org.scalameta"    % "sbt-scalafmt"              % "2.4.5")
 addSbtPlugin("com.codecommit" % "sbt-github-packages" % "0.5.3")
+addSbtPlugin("com.timushev.sbt" % "sbt-updates"               % "0.6.0")
+addSbtPlugin("com.codecommit"   % "sbt-github-actions"        % "0.14.2")
