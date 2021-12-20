@@ -14,6 +14,7 @@ ThisBuild / githubOwner := "FinFlow-Labs"
 ThisBuild / githubRepository := "github-packages"
 
 enablePlugins(GitHubPackagesPlugin)
+enablePlugins(DynVerPlugin)
 
 val GlobalSettingsGroup: Seq[Setting[_]] = Seq(
   githubOwner := "FinFlow-Labs",
