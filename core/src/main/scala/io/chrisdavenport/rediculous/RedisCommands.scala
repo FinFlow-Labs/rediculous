@@ -521,6 +521,55 @@ object RedisCommands {
   def xautoclaimdetail[F[_]: RedisCtx](stream: String, args: XAutoClaimArgs): F[XAutoClaimDetail] = 
     xautoclaimraw(stream, args, false)
 
+  sealed trait XInfoValue
+  object XInfoValue {
+    case class Integer(value: Long) extends XInfoValue
+    case class Str(value: String) extends XInfoValue
+    case class StreamRecord(value: StreamsRecord) extends XInfoValue
+    case class StreamRecords(value: List[StreamsRecord]) extends XInfoValue
+    case class Records(value: List[XInfoRecord]) extends XInfoValue
+    case class UnlabelledRecords(value: List[List[XInfoValue]]) extends XInfoValue
+
+    implicit val result: RedisResult[XInfoValue] = new RedisResult[XInfoValue] {
+      def decode(resp: Resp): Either[Resp, XInfoValue] = 
+        resp match {
+          case Resp.BulkString(Some(bv)) => bv.decodeUtf8.leftMap(_ => resp).map(Str.apply)
+          case Resp.SimpleString(value) => Right(Str(value))
+          case Resp.Integer(i) => Right(Integer(i))
+          case r => 
+            RedisResult[StreamsRecord].decode(r).map(StreamRecord.apply)
+              .leftMap(_ => resp)
+              .leftFlatMap(RedisResult[List[StreamsRecord]].decode(_).map(StreamRecords.apply))
+              .leftMap(_ => resp)
+              .leftFlatMap(RedisResult[List[XInfoRecord]].decode(_).map(Records.apply))
+              .leftMap(_ => resp)
+              .leftFlatMap(RedisResult[List[List[XInfoValue]]].decode(_).map(UnlabelledRecords.apply))
+        }
+    }
+  }
+
+  final case class XInfoRecord(keyValues: List[(String, XInfoValue)])
+  object XInfoRecord {
+
+    implicit val result : RedisResult[XInfoRecord] = new RedisResult[XInfoRecord] {
+      def decode(resp: Resp): Either[Resp,XInfoRecord] = {
+        RedisResult[List[(String, XInfoValue)]].decode(resp).map(XInfoRecord.apply)
+      }
+    }
+  }
+  
+  def xinfoconsumer[F[_]: RedisCtx](stream: String, groupName: String): F[List[XInfoRecord]] = 
+    RedisCtx[F].unkeyed(NEL.of("XINFO", "CONSUMERS", stream, groupName))
+
+  def xinfogroup[F[_]: RedisCtx](stream: String): F[List[XInfoRecord]] = 
+    RedisCtx[F].unkeyed(NEL.of("XINFO", "GROUPS", stream))
+
+  def xinfostream[F[_]: RedisCtx](stream: String, fullOpt: Boolean = false, countOpt: Option[Int] = None): F[XInfoRecord] = {
+    val full = Alternative[List].guard(fullOpt).as("FULL")
+    val count = countOpt.toList.flatMap(c => List("COUNT", c.encode))
+    RedisCtx[F].unkeyed(NEL("XINFO", "STREAM" :: stream :: full ::: count))
+  }
+
   def xdel[F[_]: RedisCtx](stream: String, messageIds: List[String]): F[Long] = 
     RedisCtx[F].unkeyed(NEL("XDEL", stream :: messageIds))
 
